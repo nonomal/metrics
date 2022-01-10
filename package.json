@@ -62,7 +62,7 @@
   },
   "devDependencies": {
     "eslint": "^8.2.0",
-    "jest": "^27.3.0",
+    "jest": "^27.4.7",
     "libxmljs2": "^0.29.0",
     "nodemon": "^2.0.13"
   },
