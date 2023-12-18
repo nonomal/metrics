@@ -1,9 +1,9 @@
 //Setup
-export default async function({login, data, graphql, q, imports, queries, account}, {enabled = false} = {}) {
+export default async function({login, data, graphql, q, imports, queries, account}, {enabled = false, extras = false} = {}) {
   //Plugin execution
   try {
     //Check if plugin is enabled and requirements are met
-    if ((!enabled) || (!q.isocalendar))
+    if ((!q.isocalendar) || (!imports.metadata.plugins.isocalendar.enabled(enabled, {extras})))
       return null
 
     //Load inputs
@@ -13,33 +13,22 @@ export default async function({login, data, graphql, q, imports, queries, accoun
     const now = new Date()
     const start = new Date(now)
     if (duration === "full-year")
-      start.setFullYear(now.getFullYear() - 1)
+      start.setUTCFullYear(now.getUTCFullYear() - 1)
     else
-      start.setHours(-24 * 180)
+      start.setUTCHours(-180 * 24)
 
-    //Compute padding to ensure last row is complete
-    const padding = new Date(start)
-    padding.setHours(-14 * 24)
+    //Ensure start day is a sunday, and that time is set to 00:00:00.000
+    if (start.getUTCDay())
+      start.setUTCHours(-start.getUTCDay() * 24)
+    start.setUTCMilliseconds(0)
+    start.setUTCSeconds(0)
+    start.setUTCMinutes(0)
+    start.setUTCHours(0)
 
-    //Retrieve contribution calendar from graphql api
-    console.debug(`metrics/compute/${login}/plugins > isocalendar > querying api`)
-    const calendar = {}
-    for (const [name, from, to] of [["padding", padding, start], ["weeks", start, now]]) {
-      console.debug(`metrics/compute/${login}/plugins > isocalendar > loading ${name} from "${from.toISOString()}" to "${to.toISOString()}"`)
-      const {user:{calendar:{contributionCalendar:{weeks}}}} = await graphql(queries.isocalendar.calendar({login, from:from.toISOString(), to:to.toISOString()}))
-      calendar[name] = weeks
-    }
-
-    //Apply padding
-    console.debug(`metrics/compute/${login}/plugins > isocalendar > applying padding`)
-    const firstweek = calendar.weeks[0].contributionDays
-    const padded = calendar.padding.flatMap(({contributionDays}) => contributionDays).filter(({date}) => !firstweek.map(({date}) => date).includes(date))
-    while (firstweek.length < 7)
-      firstweek.unshift(padded.pop())
-
-    //Compute the highest contributions in a day, streaks and average commits per day
+    //Compute contribution calendar, highest contributions in a day, streaks and average commits per day
     console.debug(`metrics/compute/${login}/plugins > isocalendar > computing stats`)
-    const {streak, max, average} = await statistics({login, data, graphql, queries})
+    const calendar = {weeks: []}
+    const {streak, max, average} = await statistics({login, graphql, queries, start, end: now, calendar})
     const reference = Math.max(...calendar.weeks.flatMap(({contributionDays}) => contributionDays.map(({contributionCount}) => contributionCount)))
 
     //Compute SVG
@@ -54,8 +43,7 @@ export default async function({login, data, graphql, q, imports, queries, accoun
                   <feComponentTransfer>
                     ${[..."RGB"].map(channel => `<feFunc${channel} type="linear" slope="${1 - k * 0.4}" />`).join("")}
                   </feComponentTransfer>
-                </filter>`
-      )
+                </filter>`)
         .join("")
     }
               <g transform="scale(4) translate(12, 0)">`
@@ -65,7 +53,7 @@ export default async function({login, data, graphql, q, imports, queries, accoun
       j = 0
       //Iterate through days
       for (const day of week.contributionDays) {
-        const ratio = day.contributionCount / reference
+        const ratio = (day.contributionCount / reference) || 0
         svg += `
                     <g transform="translate(${j * -1.7}, ${j + (1 - ratio) * size})">
                       <path fill="${day.color}" d="M1.7,2 0,1 1.7,0 3.4,1 z" />
@@ -84,35 +72,43 @@ export default async function({login, data, graphql, q, imports, queries, accoun
   }
   //Handle errors
   catch (error) {
-    if (error.error?.message)
-      throw error
-    throw {error:{message:"An error occured", instance:error}}
+    throw imports.format.error(error)
   }
 }
 
 /**Compute max and current streaks */
-async function statistics({login, data, graphql, queries}) {
-  let average = 0, max = 0, streak = {max:0, current:0}, values = []
-  const now = new Date()
-  for (let from = new Date(data.user.createdAt); from < now;) {
-    //Load contribution calendar
+async function statistics({login, graphql, queries, start, end, calendar}) {
+  let average = 0, max = 0, streak = {max: 0, current: 0}, values = []
+  //Load contribution calendar
+  for (let from = new Date(start); from < end;) {
+    //Set date range
     let to = new Date(from)
-    to.setFullYear(to.getFullYear() + 1)
-    if (to > now)
-      to = now
-    console.debug(`metrics/compute/${login}/plugins > isocalendar > loading calendar from "${from.toISOString()}" to "${to.toISOString()}"`)
-    const {user:{calendar:{contributionCalendar:{weeks}}}} = await graphql(queries.isocalendar.calendar({login, from:from.toISOString(), to:to.toISOString()}))
-    from = to
-    //Compute streaks
-    for (const week of weeks) {
-      for (const day of week.contributionDays) {
-        values.push(day.contributionCount)
-        max = Math.max(max, day.contributionCount)
-        streak.current = day.contributionCount ? streak.current + 1 : 0
-        streak.max = Math.max(streak.max, streak.current)
-      }
+    to.setUTCHours(+4 * 7 * 24)
+    if (to > end)
+      to = end
+    //Ensure that date ranges are not overlapping by setting it to previous day at 23:59:59.999
+    const dto = new Date(to)
+    dto.setUTCHours(-1)
+    dto.setUTCMinutes(59)
+    dto.setUTCSeconds(59)
+    dto.setUTCMilliseconds(999)
+    //Fetch data from api
+    console.debug(`metrics/compute/${login}/plugins > isocalendar > loading calendar from "${from.toISOString()}" to "${dto.toISOString()}"`)
+    const {user: {calendar: {contributionCalendar: {weeks}}}} = await graphql(queries.isocalendar.calendar({login, from: from.toISOString(), to: dto.toISOString()}))
+    calendar.weeks.push(...weeks)
+    //Set next date range start
+    from = new Date(to)
+  }
+  //Compute streaks
+  for (const week of calendar.weeks) {
+    for (const day of week.contributionDays) {
+      values.push(day.contributionCount)
+      max = Math.max(max, day.contributionCount)
+      streak.current = day.contributionCount ? streak.current + 1 : 0
+      streak.max = Math.max(streak.max, streak.current)
     }
   }
+  //Compute average
   average = (values.reduce((a, b) => a + b, 0) / values.length).toFixed(2).replace(/[.]0+$/, "")
   return {streak, max, average}
 }

@@ -1,53 +1,77 @@
-name: "♐ Code snippet of the day"
+name: ♐ Random code snippet
 category: github
-index: 12
+description: |
+  This plugin displays a random code snippet from recent activity history.
+notes: |
+  > ⚠️ When improperly configured, this plugin could display private code.
+  > If you work with sensitive data or company code, it is advised to keep this plugin disabled.
+  > Use at your own risk, *metrics* and its authors cannot be held responsible for any resulting code leaks.
+examples:
+  default: https://github.com/lowlighter/metrics/blob/examples/metrics.plugin.code.svg
+index: 23
 supports:
   - user
   - organization
+scopes:
+  - public_access
 inputs:
 
-  # Enable or disable plugin
   plugin_code:
-    description: Display a random code snippet from recent activity
+    description: |
+      Enable code plugin
     type: boolean
     default: no
 
-  # Maximum number of lines that a code snippet can contain
   plugin_code_lines:
-    description: Maximum number of line that a code snippet can contain
+    description: |
+      Display limit (lines per code snippets)
     type: number
     default: 12
+    min: 1
+    max: 128
 
-  # Number of activity events to load
-  # A high number will consume more requests
   plugin_code_load:
-    description: Number of events to load
+    description: |
+      Events to load
     type: number
-    default: 100
+    default: 400
     min: 100
     max: 1000
 
-  # Set events visibility (use this to restrict events when using a "repo" token)
+  plugin_code_days:
+    description: |
+      Events maximum age
+    type: number
+    default: 3
+    min: 0
+    max: 365
+    zero: disable
+
   plugin_code_visibility:
-    description: Set events visibility
+    description: |
+      Events visibility
+
+      Can be used to toggle private activity visibility when using a token with `repo` scope
     type: string
     default: public
     values:
       - public
       - all
 
-  # List of repositories that will be skipped
   plugin_code_skipped:
-    description: Repositories to skip
+    description: |
+      Skipped repositories
     type: array
-    format: comma-separated
+    format: 
+      - newline-separated
+      - comma-separated
     default: ""
     example: my-repo-1, my-repo-2, owner/repo-3, ...
+    inherits: repositories_skipped
 
-  # Restrict code snippet languages
-  # These are guessed through linguist
   plugin_code_languages:
-    description: Restrict code snippet languages
+    description: |
+      Showcased languages
     type: array
     format: comma-separated
     default: ""
